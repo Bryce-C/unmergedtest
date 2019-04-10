@@ -8,35 +8,37 @@ import pickle
 import threading
 import os
 # Multithreaded Python server : TCP Server Socket Thread Pool
-#
 import time
 from time import sleep
 
 import random
 import sys
  
-global penWidth, filledThreshold, rows
+#Global variables used throughout the program
 squareSize = 50
 penWidth = 0
+rows = 10
 img = Image.new('1', (squareSize, squareSize), 0)  
 percentFilledChecker = ImageDraw.Draw(img)
 filledThreshold = 0.5
-
+canvasList = []
 mouseEventList = []
 pixels = squareSize*squareSize
+lastx = 0
+lasty = 0
 
+window = Tk()
+window.title("Divide and Conquer")
+
+end = False
 
 global connectionIsOK
 connectionISOK = True
 
-window = Tk()
-window.title("Divide and Conquer")
-global rows
-rows = 10
-squareSize = 50
-global canvasList 
+
+
+
 global CurrentGameBoard
-global AreaList
 global countNumber
 global SquareState
 global myUserID
@@ -54,12 +56,9 @@ global genesis
 global rtt 
 ReceiveQueue = []
 notConnected = True
-
 firstConnection = True
 myUserID = ""
-canvasList = []
 CurrentGameBoard = []
-AreaList = []
 lock = threading.BoundedSemaphore(value=1)
 IPList = []
 socketUseList = []
@@ -73,8 +72,8 @@ reconnectLock = threading.BoundedSemaphore(value=1)
 syncLock = threading.BoundedSemaphore(value=1)
 startLock = threading.BoundedSemaphore(value=1)
 
-global end
-end = False
+
+
  
 def getFastestUser(queue):
 	fastest = 0
@@ -365,7 +364,7 @@ def TurnClientIntoServer():
 			print("binded waiting for players")
 			global number
 			players = 0 
-			number = 3
+			number = 0
 			print("Len IPLIST", len(IPList))
 			print("IP List: ")
 			print(IPList)
@@ -458,22 +457,30 @@ def PositionIntoIndex(position):
 	rowNumber = position//rows
 	return (rowNumber,columnNumber)
 
+
+#Function that is called on the initial click of the mouse on one of the tiles
+#Stores the lastx and last y coordinates for line drawing
+#Has the logic for the locking mechanism for tiles
 def xy(event):
-	global lastx, lasty  
-	
-	if event.widget.cget('state') != 'disabled': 
+	global lastx, lasty
+	#Check for if the tile is in a disabled state (you should not be able to draw in it)
+	if event.widget.cget('state') != 'disabled':
+		#If not, update lastx and lasty and append to mouseEventList
 		lastx, lasty = event.x, event.y
 		mouseEventList.extend([lastx, lasty])  
+		#Calculate the index for the canvasList for server use
 		id = str(event.widget)
 		position =0
 		if(len(id)==9):
 			position = int(id[8])
+		if(len(id)==11):
+			position = int(id[8])*100+ int(id[9])*10 + int(id[10])
 		if(len(id)==10):
 			position = int(id[8])*10 + int(id[9])
 		if(len(id)==8):
 			position = 1
-		print("Position", position)
 		if (isServer):
+			#TODO: delete?
 			#lock.acquire()
 			#buffer system to check the times, then if that time is
 			# smallest then set it, 
@@ -507,13 +514,14 @@ def xy(event):
    
 			tcpClientA.send(data) 
 
-		  
+#Function to draw the line while mouse button is held down
+#Is pretty much for the local user		  
 def addLine(event):
 	global lastx, lasty
 	global isServer
+	#Check if you can draw a line
 	if event.widget.cget('state') != 'disabled':   
-		
-			 
+		#Restrict the x and y coordinates to be within the tile 	 
 		if event.x > squareSize:
 			event.x = squareSize
 		if event.x < 0:
@@ -526,12 +534,6 @@ def addLine(event):
 		event.widget.create_line((lastx, lasty, event.x, event.y), width=penWidth)
 		mouseEventList.extend([event.x, event.y])
 		lastx, lasty = event.x, event.y
-
-		#print( (lastx, lasty) )
-		global AreaList
-		AreaList.append(tuple((lastx, lasty)))
-		AreaList = list(set(AreaList))
-
 
 def checkIfServerAlive():
 	global tcpClientA, isServer
@@ -558,33 +560,21 @@ def checkIfServerAlive():
 
 
 
-
+#Function that is called when user releases the mouse button
+#Calculate the percentage of the filled grid and contacts server
 def doneStroke(event):
 	if event.widget.cget('state') != 'disabled':
-		
-
-		#DEBUG - Picks a random color to set the BG   
-		#Clears all the drawing inside the Canvas
-		global SquareState
-		global percentFilled, filledThreshold
+		global SquareState, percentFilled, filledThreshold, percentFilledChecker
+		#Draws the line in the invisible pillow img to calculate % filled
 		percentFilledChecker.line(mouseEventList, fill=1, width=penWidth)
 		output = np.asarray(img)
 		percentFilled = np.count_nonzero(output)/pixels
 		percentFilledString = str(int(round(percentFilled*100, 0)))
-		print("Percent Filled: " + percentFilledString)
-		#percentFilledChecker.rectangle((0,0,squareSize,squareSize), fill=0)
-		#mouseEventList.clear()
-
-		#Clears the image for reuse, seems faster than remaking the image everytime
-		#
-		#Sets the background color and disables the canvas
-		color = "grey"
-		print ("canvas List:")
 		
+		#Calculate the index of the tile in the canvasList array
 		position = 0
 		id = str(event.widget)
 		position =0
-
 		if(len(id)==9):
 			position = int(id[8])
 		if(len(id)==11):
@@ -593,16 +583,14 @@ def doneStroke(event):
 			position = int(id[8])*10 + int(id[9])
 		if(len(id)==8):
 			position = 1
-	
-		print("percent filled vs threashold",int(percentFilledString),int(filledThreshold))
-		#print("Position", position)
-
+		#If greater than threshold
 		if (int(percentFilledString)> int(filledThreshold)):
 
 			color = colors[int(myUserID)%4]
-			#event.widget.config(bg=color, state="disabled")
 
+			#Clear the % checker img for reuse
 			percentFilledChecker.rectangle((0,0,squareSize,squareSize), fill=0)
+			#Clear the mouse event list for reuse
 			mouseEventList.clear()
 
 			if (isServer):
@@ -633,10 +621,10 @@ def doneStroke(event):
 		   
 		#add delay here to sync time
 		else:
-			#is this important what does it do?
+			#Clear the % checker img for reuse
 			percentFilledChecker.rectangle((0,0,squareSize,squareSize), fill=0)
+			#Clear the mouse event list for reuse
 			mouseEventList.clear()
-			print("not over 50")
 			if(isServer):
 				ServerSquareState.color = "grey"
 				ServerSquareState.state = "normal"
@@ -664,68 +652,88 @@ def doneStroke(event):
 				tcpClientA.send(data) 
 		
 
-		print (len(AreaList))
-		del AreaList[:]
-		print("new Listlength")
-		print(len(AreaList))
-
+	#Clears all the drawing in the tile
 	event.widget.delete("all")
 
+#Hides the gameboard grid
 def hideGrid():
-	print("Hide Grid Called")
 	global canvasList
 	for item in canvasList:
 		item.grid_remove()		
 
+#Shows the gameboard grid
 def showGrid():
 	print("Show Grid Called")
 	global canvasList
 	for item in canvasList:
 		item.grid()
 
+#Function to check for the end of the game
+#Will print into the main canvas and close the game in 15 seconds if endstate is found
 def endChecker():
-    global end, canvasList, window
-    squares = rows*rows
-    while end == False:
-        endDict={"red":0,
+	global end, canvasList, window
+	squares = rows*rows
+	while end == False:
+		endDict={"red":0,
 			"black":0,
 			"green":0,
 			"blue":0
 		}
-        for item in canvasList:
-            if item.cget('bg') == "red":
-                endDict["red"] += 1
-            if item.cget('bg') == "black":
-                endDict["black"] += 1
-            if item.cget('bg') == "green":
-                endDict["green"] += 1
-            if item.cget('bg') == "blue":
-                endDict["blue"] += 1
-        total = sum(endDict.values())    
-        print(total," ",squares)
-        if total >= squares:
-            print("End State!")
-            hideGrid()
-            end = True
-            winner = str(max(endDict, key=endDict.get)).upper()
-            endmsg = "Game is Over\n\nRed had " + str(endDict["red"]) + " squares.\nGreen had " + str(endDict["green"]) + " squares.\nBlue had " + str(endDict["blue"]) + " squares.\nBlack had " + str(endDict["black"]) + " squares.\n\nThe Winner is " + winner
-            Label(window, text=endmsg, font= ("Arial", 36)).grid()
-            time.sleep(15)
-            os._exit(1)
-        time.sleep(1)
-    return None
-#print("EnterID")
-#myUserID = input()
+		#Iterate through the grid and tally the colors
+		for item in canvasList:
+			if item.cget('bg') == "red":
+				endDict["red"] += 1
+			if item.cget('bg') == "black":
+				endDict["black"] += 1
+			if item.cget('bg') == "green":
+				endDict["green"] += 1
+			if item.cget('bg') == "blue":
+				endDict["blue"] += 1
+		total = sum(endDict.values())    
+		if total >= squares:
+			print("End State!")
+			hideGrid()
+			end = True
+			#Find the highest value
+			highestKey = max(endDict.values())
+			#Find all the key values that match the highest key
+			winnerKeys = [k for k, v in endDict.items() if v == highestKey]
+			winners = ""
+			#If more than one winner
+			if len(winnerKeys) > 1:
+				#Append the list of winners
+				for num in range(len(winnerKeys)):
+					if num < len(winnerKeys)-1:
+						winners += winnerKeys[num] + " & "
+					else:
+						winners += winnerKeys[num]
+				winners = winners.upper()
+				endmsg = "Game is Over\n\nRed had " + str(endDict["red"]) + " squares.\nGreen had " + str(endDict["green"]) + " squares.\nBlue had " + str(endDict["blue"]) + " squares.\nBlack had " + str(endDict["black"]) + " squares.\n\nThe Winners are " + winners
+				Label(window, text=endmsg, font= ("Arial", 36)).grid()
+			#Only one winner
+			else:
+				winners = winnerKeys[0].upper()
+				endmsg = "Game is Over\n\nRed had " + str(endDict["red"]) + " squares.\nGreen had " + str(endDict["green"]) + " squares.\nBlue had " + str(endDict["blue"]) + " squares.\nBlack had " + str(endDict["black"]) + " squares.\n\nThe Winner is " + winners
+				Label(window, text=endmsg, font= ("Arial", 36)).grid()
+			#Sleep for 15 and kill the program
+			time.sleep(15)
+			os._exit(1)
+		#Sleep 1 second
+		time.sleep(1)
+	return None
 
+#Function for the back button
 def backToStart():
     for widget in window.winfo_children():
         widget.destroy()
     roleCheck()
 
+#Clears all the widgets in the window
 def clearScreen():
 	for widget in window.winfo_children():
 			widget.destroy()
 
+#Main menu, checks if you are the server or client
 def roleCheck():
 	global isServer
 	isServer = False
@@ -739,6 +747,7 @@ def roleCheck():
 	button2.pack(side=RIGHT)
 	Label(window, text="\n\n").pack()
 
+#Main menu for the server
 def serverGUI():
     global isServer
     isServer = True
@@ -760,8 +769,6 @@ def serverGUI():
     threshLabel.pack()
     filledThresholdScale = Scale(window, from_=1, to=100, orient=HORIZONTAL)
     filledThresholdScale.pack()
-
-
     Label(window, text="").pack()
     buttonFrame = Frame(window)
     buttonFrame.pack()
@@ -772,6 +779,7 @@ def serverGUI():
     button.pack(side=LEFT)
     Label(window, text="").pack()
 
+#Main menu for the Client
 def clientGUI():
 	clearScreen()
 	Label(window, text="\nEnter the IP of the server\n").pack()
@@ -782,18 +790,18 @@ def clientGUI():
 	ipEnter.insert(0, "192.168.137.")
 	ipEnter.pack(side=LEFT)
 	Label(entryFrame, text="").pack(side=LEFT)
-
 	Label(window, text="").pack()
 	buttonFrame = Frame(window)
 	buttonFrame.pack()
-
-	button1 = Button(buttonFrame, text="Connect", command= lambda: clientLobby(ipEnter))
+	button1 = Button(buttonFrame, text="Submit IP", command= lambda: clientLobby(ipEnter))
 	button1.pack(side=LEFT)
 	Label(buttonFrame, text=" ").pack(side=LEFT)
 	button2 = Button(buttonFrame, text="Back", command=backToStart)
 	button2.pack(side=LEFT)
 	Label(window, text="").pack()
 
+#Function that is called when server hits "Submit Settings" button
+#Makes button that you press to start the server
 def submitSettings(rowScale, penScale, filledThresholdScale):
 	global window, rows, penWidth, filledThreshold, startLock
 	startLock.acquire()
@@ -804,18 +812,21 @@ def submitSettings(rowScale, penScale, filledThresholdScale):
 	print(rows)
 	print(penWidth)
 	print(filledThreshold)
-	button = Button(window, text="Start", command=start)
+	button = Button(window, text="Start Server", command=start)
 	button.pack(anchor=CENTER)
 
+#Function that is called when the Client enters the IP
+#Makes a button you press called Connect to Server to connect to a running server
 def clientLobby(ipEnter):
 	global connectionIP
 	connectionIP = ipEnter.get()
 	print(connectionIP)
 	for widget in window.winfo_children():
 		widget.destroy()
-	button = Button(window, text="Ready", command=start)
+	button = Button(window, text="Connect to Server", command=start)
 	button.pack(anchor=CENTER)
 
+#The start function, launches all the threads and logic after client/server press start
 def start():
 	global window
 	countNumber = 0
@@ -824,24 +835,23 @@ def start():
 
 		global connectionIP
 		IPList.append(connectionIP)
-		#IPList.append(socket.gethostname())
 		_thread.start_new_thread(HandleReconnectToAnotherServer,())
 		UpdateBoard = UpdateClientFromServer()
 		UpdateBoard.start()
 		startLock.acquire()
 		sleep(1)
 		_thread.start_new_thread(checkIfServerAlive,())
-		#start thread here
-
 
 	_thread.start_new_thread(TurnClientIntoServer,())
 
+	#Initilize the game board
 	clearScreen()
 	startLock.acquire()
 	for r in range(rows):
 		for c in range(rows):
 			item = Canvas(window, bg="grey", height=squareSize, width=squareSize)
 			item.grid(row=r, column=c)
+			#Bind the functions to the widgets
 			item.bind("<Button-1>", xy)
 			item.bind("<B1-Motion>", addLine)
 			item.bind("<B1-ButtonRelease>", doneStroke)
@@ -853,79 +863,11 @@ def start():
 			state.state = "normal"
 			CurrentGameBoard.append(state)
 	startLock.release()
+	#Starts the endChecker Thread
+	print("DO i get here?")
 	_thread.start_new_thread(endChecker,())
 
-"""
-print("isServer?")
-Server = input()
 
-
-
-if(Server=="yes"):
-	#global penWidth,rows,filledThreshold
-	isServer = True
-	startLock.acquire()
-	print("Deny and conquer configuring settings")
- 
-	print("pen width")
-	INpenWidth = input()
-	print("rows:")
-	InRows = input()
-	print("filled percent")
-	INfilledThreshold = input()
-
-	penWidth = int(INpenWidth)
-	rows = int(InRows)
-	filledThreshold = int(INfilledThreshold)
-
-	#set input settings here. 
-	#set global settings here.
-	
-else:
-	isServer = False
-
-countNumber = 0
-
-if (not isServer):
-	#input Ip
-	#
-	print("enter Servers IP:")
-	#IP = input()
-	IPList.append('207.23.176.76')
-	#IPList.append('192.168.0.12')
-	#IPList.append("207.23.181.250")
-	_thread.start_new_thread(HandleReconnectToAnotherServer,())
-	UpdateBoard = UpdateClientFromServer()
-	UpdateBoard.start()
-	startLock.acquire()
-	sleep(1)
-	_thread.start_new_thread(checkIfServerAlive,())
-
-	#start thread here
-
-
-_thread.start_new_thread(TurnClientIntoServer,())
-
-
-startLock.acquire()
-for r in range(rows):
-	for c in range(rows):
-		item = Canvas(window, bg="grey", height=squareSize, width=squareSize)
-		item.grid(row=r, column=c)
-		item.bind("<Button-1>", xy)
-		item.bind("<B1-Motion>", addLine)
-		item.bind("<B1-ButtonRelease>", doneStroke)
-		canvasList.append(item)
-		countNumber =countNumber+1
-		state = GameStateObj()
-		state.canvasNumber = countNumber
-		state.color = "grey"
-		state.state = "normal"
-		CurrentGameBoard.append(state)
-startLock.release()
-_thread.start_new_thread(endChecker,())
-"""					   
-
-
+#The "Main" function, takes you to rolecheck dialog and starts the tkinker main loop
 roleCheck()
 window.mainloop()
