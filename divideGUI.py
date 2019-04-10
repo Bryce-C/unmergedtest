@@ -36,7 +36,6 @@ rows = 10
 squareSize = 50
 global canvasList 
 global CurrentGameBoard
-global AreaList
 global countNumber
 global SquareState
 global myUserID
@@ -59,7 +58,6 @@ firstConnection = True
 myUserID = ""
 canvasList = []
 CurrentGameBoard = []
-AreaList = []
 lock = threading.BoundedSemaphore(value=1)
 IPList = []
 socketUseList = []
@@ -396,6 +394,7 @@ def TurnClientIntoServer():
 					players = players+1
 
 				print("Do I get HEre?")
+				#Check to see that this is not the first connection and show the grid
 				if (not firstConnection):
 					showGrid()
 		if(isServer):
@@ -458,13 +457,18 @@ def PositionIntoIndex(position):
 	rowNumber = position//rows
 	return (rowNumber,columnNumber)
 
+#Function that is called on the initial click of the mouse on one of the tiles
+#Stores the lastx and last y coordinates for line drawing
+#Has the logic for the locking mechanism for tiles
 def xy(event):
 	global lastx, lasty  
-	
-	if event.widget.cget('state') != 'disabled': 
+	#Check for if the tile is in a disabled state (you should not be able to draw in it)
+	if event.widget.cget('state') != 'disabled':
+		#If not, update lastx and lasty and append to mouseEventList
 		lastx, lasty = event.x, event.y
 		mouseEventList.extend([lastx, lasty])  
 		id = str(event.widget)
+		#Calculate the tile number
 		position =0
 		if(len(id)==9):
 			position = int(id[8])
@@ -507,13 +511,15 @@ def xy(event):
    
 			tcpClientA.send(data) 
 
-		  
+#Function to draw the line while mouse button is held down
+#Is pretty much for the local user
 def addLine(event):
 	global lastx, lasty
 	global isServer
+	#Check if you can draw a line
 	if event.widget.cget('state') != 'disabled':   
 		
-			 
+		#Restrict the x and y coordinates to be within the tile 
 		if event.x > squareSize:
 			event.x = squareSize
 		if event.x < 0:
@@ -526,12 +532,6 @@ def addLine(event):
 		event.widget.create_line((lastx, lasty, event.x, event.y), width=penWidth)
 		mouseEventList.extend([event.x, event.y])
 		lastx, lasty = event.x, event.y
-
-		#print( (lastx, lasty) )
-		global AreaList
-		AreaList.append(tuple((lastx, lasty)))
-		AreaList = list(set(AreaList))
-
 
 def checkIfServerAlive():
 	global tcpClientA, isServer
@@ -558,28 +558,23 @@ def checkIfServerAlive():
 
 
 
-
+#Function that is called when user releases the mouse button
+#Calculate the percentage of the filled grid and 
 def doneStroke(event):
+	#Check if you could draw
 	if event.widget.cget('state') != 'disabled':
-		
-
-		#DEBUG - Picks a random color to set the BG   
-		#Clears all the drawing inside the Canvas
 		global SquareState
 		global percentFilled, filledThreshold
+		#Draws the line in the invisible pillow img to calculate % filled
 		percentFilledChecker.line(mouseEventList, fill=1, width=penWidth)
 		output = np.asarray(img)
 		percentFilled = np.count_nonzero(output)/pixels
 		percentFilledString = str(int(round(percentFilled*100, 0)))
+		#Reports the percent filled
 		print("Percent Filled: " + percentFilledString)
-		#percentFilledChecker.rectangle((0,0,squareSize,squareSize), fill=0)
-		#mouseEventList.clear()
-
-		#Clears the image for reuse, seems faster than remaking the image everytime
-		#
+		
 		#Sets the background color and disables the canvas
 		color = "grey"
-		print ("canvas List:")
 		
 		position = 0
 		id = str(event.widget)
@@ -593,16 +588,14 @@ def doneStroke(event):
 			position = int(id[8])*10 + int(id[9])
 		if(len(id)==8):
 			position = 1
-	
-		print("percent filled vs threashold",int(percentFilledString),int(filledThreshold))
-		#print("Position", position)
-
+		
+		#If the percent filled is greater than the threshold
 		if (int(percentFilledString)> int(filledThreshold)):
-
+			#Set the color to the color of the player
 			color = colors[int(myUserID)%4]
-			#event.widget.config(bg=color, state="disabled")
-
+			#Clears the image for reuse, seems faster than remaking the image everytime
 			percentFilledChecker.rectangle((0,0,squareSize,squareSize), fill=0)
+			#Clear the mouse event list
 			mouseEventList.clear()
 
 			if (isServer):
@@ -612,7 +605,7 @@ def doneStroke(event):
 				ServerSquareState.UserID = myUserID
 				message = {"gameState":ServerSquareState}
 				PriorityServerUpdate(message)
-
+				#TODO: DELETE THIS?
 				#lock.acquire()
 				#CurrentGameBoard[int(position)-1].color = color
 				#CurrentGameBoard[int(position)-1].state = "disabled"
@@ -628,15 +621,14 @@ def doneStroke(event):
 				message = {"gameState":SquareState}
 				data = pickle.dumps(message)
 				tcpClientA.send(data) 
-				#clear list?
 
-		   
+		#TODO: DELETE THIS?  
 		#add delay here to sync time
 		else:
-			#is this important what does it do?
+			#Clears the image for reuse, seems faster than remaking the image everytime
 			percentFilledChecker.rectangle((0,0,squareSize,squareSize), fill=0)
+			#Clear the mouse event list
 			mouseEventList.clear()
-			print("not over 50")
 			if(isServer):
 				ServerSquareState.color = "grey"
 				ServerSquareState.state = "normal"
@@ -644,13 +636,14 @@ def doneStroke(event):
 				ServerSquareState.UserID = ""
 				message = {"gameState":ServerSquareState}
 				PriorityServerUpdate(message)
+				#TODO: DELETE THIS?
 				#lock.acquire()
 				#CurrentGameBoard[int(position)-1].color = "grey" 
 				#CurrentGameBoard[int(position)-1].state = "normal"
 				#CurrentGameBoard[int(position)-1].UserID = ""
 				# call another function. that sets its game board. 
 				#lock.release()
-				 # disbale the color for all other users
+				# disbale the color for all other users
 				# that user though does not get diabled
 
 			elif (not isServer):
@@ -662,27 +655,24 @@ def doneStroke(event):
 				message = {"gameState":SquareState}
 				data = pickle.dumps(message)
 				tcpClientA.send(data) 
-		
-
-		print (len(AreaList))
-		del AreaList[:]
-		print("new Listlength")
-		print(len(AreaList))
-
+	
+	#Deletes all drawn lines in the box
 	event.widget.delete("all")
 
+#Hides the game grid during disconnect
 def hideGrid():
-	print("Hide Grid Called")
 	global canvasList
 	for item in canvasList:
 		item.grid_remove()		
 
+		#Shows the grid after reconnect
 def showGrid():
-	print("Show Grid Called")
 	global canvasList
 	for item in canvasList:
 		item.grid()
 
+#Function to check for the end of the game
+#Will print into the main canvas and close the game in 15 seconds if endstate is found
 def endChecker():
     global end, canvasList, window
     squares = rows*rows
@@ -692,6 +682,7 @@ def endChecker():
 			"green":0,
 			"blue":0
 		}
+	#Go throught grid and add up all the colors
         for item in canvasList:
             if item.cget('bg') == "red":
                 endDict["red"] += 1
@@ -701,22 +692,26 @@ def endChecker():
                 endDict["green"] += 1
             if item.cget('bg') == "blue":
                 endDict["blue"] += 1
-        total = sum(endDict.values())    
-        print(total," ",squares)
+	#Calulate the total
+        total = sum(endDict.values())
         if total >= squares:
             print("End State!")
             hideGrid()
             end = True
-            winner = str(max(endDict, key=endDict.get)).upper()
+	    highest = max(endDict.values())
+	    winnerKeys = [k for k, v in endDict.items() if v == highest]
+            winners = ""
+	    if len(winnerKeys) > 1:
+            
             endmsg = "Game is Over\n\nRed had " + str(endDict["red"]) + " squares.\nGreen had " + str(endDict["green"]) + " squares.\nBlue had " + str(endDict["blue"]) + " squares.\nBlack had " + str(endDict["black"]) + " squares.\n\nThe Winner is " + winner
             Label(window, text=endmsg, font= ("Arial", 36)).grid()
             time.sleep(15)
             os._exit(1)
+	#Else Sleep
         time.sleep(1)
     return None
-#print("EnterID")
-#myUserID = input()
 
+#Function for the back button in the UI
 def backToStart():
     for widget in window.winfo_children():
         widget.destroy()
